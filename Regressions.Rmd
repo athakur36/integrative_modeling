@@ -1,0 +1,888 @@
+---
+title: "Awakening_regression"
+output:
+  html_document:
+    df_print: paged
+Author: Arti
+---
+
+### 1) Preliminary step: Split the data in half for "explainatory" and "predictive" steps 
+
+### 2) On the one half, we identify the "explanatory model"
+#### 2a) F/p-value
+#### 2b) BIC
+#### 2c) adjusted R^2
+#### 2d) RMSE with "one standard error rule" using rsqr instead of accuracy
+
+### 3) on the second half of the data, we calculate the "prediction error" test (RMSE/MAE) for each one of the 4 "most explanatory models" (e.g. with https://www.statology.org/k-fold-cross-validation-in-r/ ) to decide which of these four models is the best.
+
+
+
+### 0. Load the relevant packages
+
+```{r, eval = TRUE, include = FALSE}
+rm(list=ls(all=TRUE))
+
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(ggrepel)
+library(stringr)
+library(knitr)
+library(CCA)
+library(CCP)
+library(readxl)
+library(caret)
+library(heplots)
+library(leaps)
+library(olsrr)
+library(flexmix)
+library(Hmisc)
+```
+
+### 1. Load the data and split in two half
+```{r, eval = TRUE, include = FALSE}
+
+data = read_xlsx("../data/AggregateData_Jan5.xlsx")
+
+#summary(data)
+
+set.seed(917829235)
+#Spliting the data in "explain" and "predict" sets
+index = createDataPartition(data$DV1, p = 0.50, list = FALSE)
+set.explain = data[index, ]
+set.predict = data[-index, ]
+
+```
+
+
+```{r}
+# For DV1
+X <- set.explain %>% 
+  dplyr::select(IV1, IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV29, IV28, DV1)
+
+#par(mfrow = c(6, 4))
+par(mar= c(1,1,1,1))
+hist.data.frame(as.data.frame(X))
+#saving the data for SPSS
+write.csv(X, file = "explainData_SPSS.csv")
+
+#checking for the missing values
+sum(is.na(X))
+```
+
+### Step 2a: using backward selection
+```{r}
+library(olsrr)
+#fitall model
+fitall <- lm(DV1~., data= X)
+summary(fitall)
+
+#backward elimination at p>0.05
+model.backward.p <- ols_step_backward_p(fitall, prem= 0.05, details = TRUE)
+
+#further investigation
+#now we are computing different criterions for these models.
+p.m <- c(24, 23, 22, 21, 20, 19,18,17,16,15,14,13,12,11, 10, 9, 8, 7) #number of coefficients in each model: p
+ssto <- sum((X$DV1-mean(X$DV1))^2)
+sse <- (1-model.backward.p$rsquare)*ssto
+n<- nrow(X)
+mod.aic <- n*log(sse/n)+2*p.m
+bic <- n*log(sse/n)+log(n)*p.m
+res_sub <- cbind(model.backward.p$which, sse, model.backward.p$rsquare, model.backward.p$adjr,model.backward.p$mallows_cp, bic, mod.aic)
+
+colnames(res_sub) <- c(colnames(model.backward.p$which), "sse", "R^2", "R^2_a", "Cp", "bic",
+"aic")
+round(res_sub, 3)
+
+#printing the final model
+model.backward.p$model
+
+# selected model (with 7 parameters)
+model1<- DV1 ~ IV4 + IV6 + IV7 + IV8 + IV12 + IV20 + IV24
+
+```
+
+### Step 2a continue: using forward selection using p-value criteria
+```{r}
+#farward selection at p<0.05
+model.forward.p <- ols_step_forward_p(fitall, penter= 0.05, details = TRUE)
+
+# final model
+model.forward.p$model
+
+
+#futher investigation
+p.m <- c(1:27) #number of coefficients in each model: p
+ssto <- sum((X$DV1-mean(X$DV1))^2)
+sse <- (1-model.forward.p$rsquare)*ssto
+n<- nrow(X)
+mod.aic <- n*log(sse/n)+2*p.m
+bic <- n*log(sse/n)+log(n)*p.m
+res_sub <- cbind(model.forward.p$which, sse, model.forward.p$rsquare, model.forward.p$adjr,model.forward.p$mallows_cp, bic, mod.aic)
+
+colnames(res_sub) <- c(colnames(model.forward.p$which), "sse", "R^2", "R^2_a", "Cp", "bic",
+"aic")
+round(res_sub, 3)
+```
+### Results: Results for the forard and backward elimination are converging. hence we have one final model from this step.
+
+### 2b: backward and forward selection using BIC criteria
+```{r}
+#backward selection
+#here log(n) is used for BIC as elemination criterion
+model.bic.backward<-stepAIC(fitall, scope = list(upper = fitall, lower = ~1), direction = "backward",
+k = log(n), trace = TRUE)
+summary(model.bic.backward)
+
+
+#forward selection
+fit0 <- lm(DV1 ~ 1, data = X) 
+model.bic.forward<-stepAIC(fit0, scope = list(upper = fitall, lower = ~1), direction = "forward",
+k = log(n), trace = TRUE)
+summary(model.bic.forward)
+
+# printing final model for backward selection
+model.bic.backward$coefficients
+
+# printing final model for forward selection
+model.bic.forward$coefficients
+
+# both methods converging to the same model (5 parameters)
+model2 <- DV1 ~ IV6 + IV7 + IV8 + IV12 + IV24
+
+```
+####Results: Both processes converge an result in model with 7 parameters.
+
+###2c: finding explainatory model using SSE and exhaustive search (model selection: adj rsqr)
+```{r}
+sub_set <- regsubsets(DV1 ~ ., data = X, nbest = 1,
+nvmax = 26, method = "exhaustive")
+sum_sub <- summary(sub_set)
+sum_sub
+plot(sub_set)
+
+
+
+#We need to calculate the model AIC or BIC manually:
+p.m <- rowSums(sum_sub$which) #number of coefficients in each model: p
+ssto <- sum((X$DV1-mean(X$DV1))^2)
+sse <- (1-sum_sub$rsq)*ssto
+n<- nrow(set.explain)
+aic <- n*log(sse/n)+2*p.m
+bic <- n*log(sse/n)+log(n)*p.m
+res_sub <- cbind(sum_sub$which, sse, sum_sub$rsq, sum_sub$adjr2,sum_sub$cp, bic, aic)
+
+#The regsubsets function does not fit the none-model with no X variable, so we will have to do it manually:
+
+fit0 <- lm(DV1 ~ 1, data = X) #none-model: intercept only
+sse0 <- sum(fit0$residuals^2)
+p0 <- 1 #only one regression coefficient
+c0 <- sse0/summary(fitall)$sigma^2 - (n - 2 * p0)
+aic0 <- n * log(sse0/n) + 2 * p0
+bic0 <- n * log(sse0/n) + log(n) * p0
+none <- c(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, sse0, 0, 0, c0, bic0, aic0) #model summary for intercept model
+
+#Let us now combine all the results:
+# combine the results
+res_sub <- rbind(none, res_sub)
+colnames(res_sub) <- c(colnames(sum_sub$which), "sse", "R^2", "R^2_a", "Cp", "bic",
+"aic")
+round(res_sub, 4)
+
+
+# p.plot <- res_sub[, 1] + res_sub[, 2] + res_sub[, 3] + res_sub[, 4] + res_sub[, 5] +res_sub[, 6] + res_sub[, 7] + res_sub[, 8] + res_sub[, 9] + res_sub[, 10] + res_sub[, 11] + res_sub[, 12] + res_sub[, 13] + res_sub[, 14] + res_sub[, 15] + res_sub[, 16] + res_sub[, 17] + res_sub[, 18] + res_sub[, 19] + res_sub[, 20]
+# res.sub.plot <- as.data.frame(cbind(p.plot, res_sub))
+# best.plot <- res.sub.plot[c(1, 2, 6, 12, 16), ]
+# par(mfrow = c(3, 2))
+# plot(res.sub.plot$p.plot, res.sub.plot$`R^2`, xlab = "p", ylab = "R^2")
+# lines(best.plot$p.plot, best.plot$`R^2`, lwd = 2)
+# plot(res.sub.plot$p.plot, res.sub.plot$`R^2_a`, xlab = "p", ylab = "R^2_a")
+# lines(best.plot$p.plot, best.plot$`R^2_a`, lwd = 2)
+# plot(res.sub.plot$p.plot, res.sub.plot$Cp, xlab = "p", ylab = "Cp")
+# lines(best.plot$p.plot, best.plot$Cp, lwd = 2)
+# lines(best.plot$p.plot, best.plot$p.plot, col = "red")
+# plot(res.sub.plot$p.plot, res.sub.plot$aic, xlab = "p", ylab = "aic")
+# lines(best.plot$p.plot, best.plot$aic, lwd = 2)
+# plot(res.sub.plot$p.plot, res.sub.plot$bic, xlab = "p", ylab = "bic")
+# lines(best.plot$p.plot, best.plot$bic, lwd = 2)
+# par(mar=c(2,2,2,2))
+# par(mfrow = c(1, 1))
+
+# saving best models based on different criterias (R2, Adj. R2, CP, BIC)
+result<-data.frame(
+  R2 = which.max(sum_sub$rsq),
+  Adj.R2 = which.max(sum_sub$adjr2),
+  CP = which.min(sum_sub$cp),
+  BIC = which.min(sum_sub$bic)
+)
+
+# model selection using adjested rsqr criterion
+result$Adj.R2
+
+#final model
+model3 <- DV1 ~ IV3 + IV4 + IV5 + IV6 + IV7 + IV8 + IV9 + IV12 + IV20 + IV24
+
+```
+#### Results: Here we can pick models based on our choice of criterion. For example, if we choose adj r-squared then model with 10 variables is the best choice.
+
+### 2d) RMSE with "one standard error rule" using rsqr instead of accuracy
+```{r}
+#RMSE = sqrt((sum_sub$rss)/dim(X)[1])
+# Set seed for reproducibility
+set.seed(123)
+# Set up repeated k-fold cross-validation
+train.control <- trainControl(method = "repeatedcv", number = 10)
+# Train the model
+step.model <- train(DV1 ~., data = X,
+                    method = "leapBackward", 
+                    tuneGrid = data.frame(nvmax = 1:26),
+                    trControl = train.control
+                    )
+step.model$results
+rmse.cutoff <- min(step.model$results$RMSE) 
+
+#applying 1 standard error rule
+min.rmse <- min(step.model$results$RMSE)
+min.rmsesd <- step.model$results[which.min(step.model$results$RMSE),'RMSESD']
+
+rmse.cutoff <- min.rmse + min.rmsesd
+
+plot(c(1:26), step.model$results$RMSE)
+abline(h=rmse.cutoff,lty=2)
+# model with 3 parameters has least rmse values under 1 standard deviation of minimum rmse model which is model with 4 parameters
+# printing the model 3
+
+coef(step.model$finalModel,1)
+model4 <- DV1~ IV7 + IV12 + IV24
+model4 <- DV1~ IV12
+
+```
+#### Results: train function here choose the best model with size 1 to 20 parameters using backward elimination. By default it gives us best model under each size category based on least RMSE value. The best tuned model according to this algorithm is the one with least RMSE value. Hence model 4 (with 4 parameters) should be the final selected model. However, since we are applying 1 stadard error rule here which suggests to choose most parsimonious model under 1 sd of the minimum RMSE model. Hence, select model 3 here.
+
+
+### 3. Selecting best predictive model
+Here we will test all the models (four) we found in step 1 to find the best prediction model. For the sake of comparison I first test the algorithm with all the predictors.
+
+```{r, eval = TRUE}
+# set up the training model data
+X <- set.predict %>% 
+  dplyr::select(IV1, IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV29, IV28, DV1)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Set up repeated k-fold cross-validation
+# repeated k-fold repeats the k-fold cross-validation for the desired times for reilable accuracy 
+# I tried different vales of K and repeats and fimally settled for k=5, repeats=3
+
+train.control <- trainControl(method = "repeatedcv", number = 3, repeats = 5)
+
+# Train the model with all the predictors
+step.model0 <- train(DV1 ~ ., data = X, method = "lm", trControl = train.control)
+
+
+# printing the results where astrick shows the significant coeficient for the variable
+summary(step.model0)
+coef(step.model0$finalModel)
+
+
+
+# testing with the three models (model2 and model4 are same) from "explain" step
+step.model1 <- train(model1, data = X, method = "lm", trControl = train.control)
+step.model2 <- train(model2, data = X, method = "lm", trControl = train.control)
+step.model3 <- train(model3, data = X, method = "lm", trControl = train.control)
+step.model4 <- train(model4, data = X, method = "lm", trControl = train.control)
+
+
+# gives the best model
+step.model0$finalModel
+step.model1$finalModel
+step.model2$finalModel
+step.model3$finalModel
+step.model4$finalModel
+
+# applying one standard deviation rule using RMSE criterion
+pred.mod.results <- rbind(step.model0$results, step.model1$results, step.model2$results, step.model3$results, step.model4$results)
+
+pred.rmse.min <- min(pred.mod.results$RMSE)
+pred.rmsesd <- pred.mod.results[which.min(pred.mod.results$RMSE), 'RMSESD']
+pred.cutoff <- pred.rmse.min + pred.rmsesd
+
+# plotting the cutoff
+pred.mod.results
+plot(c(1:5), pred.mod.results$RMSE)
+abline(h=pred.cutoff,lty=3)
+
+
+# printing coeficient for the best predictive model
+coef(step.model0$finalModel)
+coef(step.model1$finalModel)
+coef(step.model2$finalModel)
+coef(step.model3$finalModel)
+coef(step.model4$finalModel)
+
+
+
+
+#Checking the colinearity for the best model
+# In the case of colinearity among variables the interpretation of the regression coefficient is not reliable
+# TO check colinearity we use VIF (above 5 is bad)
+# to treat colinearity we either drop that particular variable or use PLS 
+modelDV1=lm(DV1~ IV3+IV5+IV7+IV10+IV11+IV14+IV19+IV20, data= X)
+summary(modelDV1)
+
+car::vif(modelDV1)
+
+#Result: None of the variable have VIF score above 5.
+
+```
+#### Here we see that model 2 with five predictors has the least rmse value. Now if we apply the 1 sd rule here then model 4 is most parsimonious. Looking at the all models NETI, SCS, and age seems most predictive as they are commmon in all of these models. May be that is the reason we find the final model (model4) having only these threes.
+
+#### model1<- DV1 ~ IV4 + IV6 + IV7 + IV8 + IV12 + IV20 + IV24
+#### model2 <- DV1 ~ IV6 + IV7 + IV8 + IV12 + IV24
+#### model3 <- DV1 ~ IV3 + IV4 + IV5 + IV6 + IV7 + IV8 + IV9 + IV12 + IV20 + IV24
+#### model4 <- DV1~ IV7 + IV12 + IV24
+
+#### Significant variables by name ####
+#### IV4	FFM!
+#### IV5	ASTI
+#### IV6	Mscale
+#### IV7	NETI
+#### IV8	PNSE
+#### IV9	IOS
+#### IV12	SCS
+#### IV20	BEIS
+#### IV24	Age
+
+
+```{r}
+#DV2 - Brooding
+dv2.explain.X <- set.explain %>% 
+  dplyr::select(IV1, IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV29, IV28, DV2)
+
+## model1- backward and forward selection using p-value
+fitall <- lm(DV2~., data= dv2.explain.X)
+#summary(fitall)
+#backward elimination at p>0.05
+model.backward.p <- ols_step_backward_p(fitall, prem= 0.05, details = TRUE)
+model.backward.p$model
+#farward selection at p<0.05
+model.forward.p <- ols_step_forward_p(fitall, penter= 0.05, details = TRUE)
+# final model
+model.forward.p$model
+
+# both processes converging to the same model
+DV2.model1 <- DV2~ IV3 + IV4 + IV5 +IV6 +IV12 +IV16 +IV17 +IV20 +IV24
+
+## model2- using BIC criterion
+#backward selection
+#here log(n) is used for BIC as elemination criterion
+model.bic.backward<-stepAIC(fitall, scope = list(upper = fitall, lower = ~1), direction = "backward",
+k = log(n), trace = TRUE)
+summary(model.bic.backward)
+#forward selection
+fit0 <- lm(DV2 ~ 1, data = dv2.explain.X) 
+model.bic.forward<-stepAIC(fit0, scope = list(upper = fitall, lower = ~1), direction = "forward",
+k = log(n), trace = TRUE)
+summary(model.bic.forward)
+# printing final model for backward selection
+model.bic.backward$coefficients
+# printing final model for forward selection
+model.bic.forward$coefficients
+
+#Both models are not converging. Choosing the backward elimination model here
+DV2.model2 <- DV2 ~ IV4 + IV5 +IV6 +IV12 +IV17 +IV20 +IV24
+
+################## Exhaustive search- adj-rsqr
+sub_set <- regsubsets(DV2 ~ ., data = dv2.explain.X, nbest = 1,
+nvmax = 26, method = "exhaustive")
+sum_sub <- summary(sub_set)
+sum_sub
+plot(sub_set)
+#We need to calculate the model AIC or BIC manually:
+p.m <- rowSums(sum_sub$which) #number of coefficients in each model: p
+ssto <- sum((dv2.explain.X$DV2-mean(dv2.explain.X$DV2))^2)
+sse <- (1-sum_sub$rsq)*ssto
+n<- nrow(set.explain)
+aic <- n*log(sse/n)+2*p.m
+bic <- n*log(sse/n)+log(n)*p.m
+res_sub <- cbind(sum_sub$which, sse, sum_sub$rsq, sum_sub$adjr2,sum_sub$cp, bic, aic)
+
+#The regsubsets function does not fit the none-model with no X variable, so we will have to do it manually:
+fit0 <- lm(DV2 ~ 1, data = dv2.explain.X) #none-model: intercept only
+sse0 <- sum(fit0$residuals^2)
+p0 <- 1 #only one regression coefficient
+c0 <- sse0/summary(fitall)$sigma^2 - (n - 2 * p0)
+aic0 <- n * log(sse0/n) + 2 * p0
+bic0 <- n * log(sse0/n) + log(n) * p0
+none <- c(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, sse0, 0, 0, c0, bic0, aic0) #model summary for intercept model
+#Let us now combine all the results:
+# combine the results
+res_sub <- rbind(none, res_sub)
+colnames(res_sub) <- c(colnames(sum_sub$which), "sse", "R^2", "R^2_a", "Cp", "bic",
+"aic")
+round(res_sub, 4)
+
+# saving best models based on different criterias (R2, Adj. R2, CP, BIC)
+result<-data.frame(
+  Adj.R2 = which.max(sum_sub$adjr2)
+)
+
+# model selection using adjested rsqr criterion
+result$Adj.R2
+
+#final model
+DV2.model3 <- DV2 ~ IV3 + IV4 + IV5 + IV6 + IV7 + IV8 + IV9 + IV10 + IV12 + IV16 + IV17+ IV19+ IV20 + IV24 + IV29
+
+####################### 1 stnd error rule######
+set.seed(123)
+# Set up repeated k-fold cross-validation
+train.control <- trainControl(method = "repeatedcv", number = 3)
+# Train the model
+step.model <- train(DV2 ~., data = dv2.explain.X,
+                    method = "leapBackward", 
+                    tuneGrid = data.frame(nvmax = 1:26),
+                    trControl = train.control
+                    )
+step.model$results
+rmse.cutoff <- min(step.model$results$RMSE) 
+
+#applying 1 standard error rule
+min.rmse <- min(step.model$results$RMSE)
+min.rmsesd <- step.model$results[which.min(step.model$results$RMSE),'RMSESD']
+
+plot(c(1:26), step.model$results$RMSE)
+abline(h=rmse.cutoff,lty=2)
+p<- ggplot(step.model$results, aes(x=nvmax, y=RMSE)) + 
+  geom_line() +
+  geom_point()+
+  geom_errorbar(aes(ymin=RMSE-RMSESD, ymax=RMSE+RMSESD), width=.2,
+                 position=position_dodge(0.05))
+print(p)
+# Finished line plot
+p <- p+labs(title="1 se rule", x="number of variables", y = "RMSE")+
+   theme_classic() +
+   scale_color_manual(values=c('#999999','#E69F00'))
+p <- p+ geom_hline(yintercept=min.rmse + min.rmsesd, linetype="dashed", color = "red")
+p+ geom_hline(yintercept=min.rmse - min.rmsesd, linetype="dashed", color = "red")
+# model with 7 parameters has least rmse values under 1 standard deviation of minimum rmse model which is model with 9 parameters
+# printing the model 3
+
+coef(step.model$finalModel,3)
+DV2.model4 <- DV2~ IV4+IV12+IV17
+## model 2 and 4 are the same
+
+
+################################ PREDICTION STEP ###########################
+DV2.predict.X <- set.predict %>% 
+  dplyr::select(IV1, IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV29, IV28, DV2)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Set up repeated k-fold cross-validation
+# repeated k-fold repeats the k-fold cross-validation for the desired times for reilable accuracy 
+# I tried different vales of K and repeats and fimally settled for k=5, repeats=3
+
+train.control <- trainControl(method = "repeatedcv", number = 3, repeats = 5)
+
+# Train the model with all the predictors
+step.model0 <- train(DV2 ~ ., data = DV2.predict.X, method = "lm", trControl = train.control)
+
+
+# printing the results where astrick shows the significant coeficient for the variable
+summary(step.model0)
+coef(step.model0$finalModel)
+
+
+
+# testing with the three models (model2 and model4 are same) from "explain" step
+step.model1 <- train(DV2.model1, data = DV2.predict.X, method = "lm", trControl = train.control)
+step.model2 <- train(DV2.model2, data = DV2.predict.X, method = "lm", trControl = train.control)
+step.model3 <- train(DV2.model3, data = DV2.predict.X, method = "lm", trControl = train.control)
+step.model4 <- train(DV2.model4, data = DV2.predict.X, method = "lm", trControl = train.control)
+
+length(step.model1$coefnames)
+length(step.model2$coefnames)
+length(step.model3$coefnames)
+length(step.model4$coefnames)
+
+# applying one standard deviation rule using RMSE criterion
+pred.mod.results <- rbind( step.model4$results, step.model2$results, step.model1$results, step.model3$results, step.model0$results)
+
+
+p<- ggplot(pred.mod.results, aes(x=c(3, 7,9, 15,26), y=RMSE)) + 
+  geom_line() +
+  geom_point()+
+  geom_errorbar(aes(ymin=RMSE-RMSESD, ymax=RMSE+RMSESD), width=.2,
+                 position=position_dodge(0.05))
+# Finished line plot
+p+labs(title="1 se rule", x="number of variables", y = "RMSE")+
+   theme_classic() +
+   scale_color_manual(values=c('#999999','#E69F00'))
+
+# one-standard-error rule: calculate the standard error of the estimated test MSE for each model size, and then select the smallest model for which the estimated test error is within one standard error of the lowest point on the curve. Here, model with 7 parameters has least rmse values under 1 standard deviation of minimum rmse model which is model with 9 parameters
+
+# printing coeficient for the best predictive model
+coef(step.model1$finalModel)
+
+
+```
+
+#### model1<- DV2~ IV3 + IV4 + IV5 +IV6 +IV12 +IV16 +IV17 +IV20 +IV24 (final model)
+#### model2 <- DV2 ~ IV4 + IV5 +IV6 +IV12 +IV17 +IV20 +IV24 
+#### model3 <- DV2 ~ IV3 + IV4 + IV5 + IV6 + IV7 + IV8 + IV9 + IV10 + IV12 + IV16 + IV17+ IV19+ IV20 + IV24 + IV29
+#### model4 <- DV2~ IV4  + IV5 + IV6 + IV12 + IV17 + IV20 + IV24
+
+#### Significant variables by name ####
+#### IV4	FFM!
+#### IV5	ASTI
+#### IV6	Mscale
+#### IV7	NETI
+#### IV8	PNSE
+#### IV9	IOS
+#### IV12	SCS
+#### IV17	TIPI_N
+#### IV20	BEIS
+#### IV24	Age
+
+
+```{r DV3 block}
+#DV3 - Envy resentment
+DV3.explain.X <- set.explain %>% 
+  dplyr::select(IV1, IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV29, IV28, DV3)
+
+n<- dim(DV3.explain.X)[1]
+## model1- backward and forward selection using p-value
+fitall <- lm(DV3~., data= DV3.explain.X)
+#summary(fitall)
+#backward elimination at p>0.05
+model.backward.p <- ols_step_backward_p(fitall, prem= 0.05, details = TRUE)
+model.backward.p$model
+#farward selection at p<0.05
+model.forward.p <- ols_step_forward_p(fitall, penter= 0.05, details = TRUE)
+# final model
+model.forward.p$model
+
+# both processes converging to the same model
+DV3.model1 <- DV3~ IV4 + IV5 +IV6 + IV8 +IV9 +IV10 +IV11 +IV12 +IV14 +IV15 +IV19
+
+## model2- using BIC criterion
+#backward selection
+#here log(n) is used for BIC as elemination criterion
+model.bic.backward<-stepAIC(fitall, scope = list(upper = fitall, lower = ~1), direction = "backward",
+k = log(n), trace = TRUE)
+summary(model.bic.backward)
+#forward selection
+fit0 <- lm(DV3 ~ 1, data = DV3.explain.X) 
+model.bic.forward<-stepAIC(fit0, scope = list(upper = fitall, lower = ~1), direction = "forward",
+k = log(n), trace = TRUE)
+summary(model.bic.forward)
+# printing final model for backward selection
+model.bic.backward$coefficients
+# printing final model for forward selection
+model.bic.forward$coefficients
+
+#Both models are not converging. Choosing the backward elimination model here
+DV3.model2 <- DV3 ~ IV5 +IV6 +IV10 +IV11 +IV12
+
+################## Exhaustive search- adj-rsqr
+sub_set <- regsubsets(DV3 ~ ., data = DV3.explain.X, nbest = 1,
+nvmax = 26, method = "exhaustive")
+sum_sub <- summary(sub_set)
+sum_sub
+plot(sub_set)
+# saving best models based on different criterias (R2, Adj. R2, CP, BIC)
+result<-data.frame(
+  Adj.R2 = which.max(sum_sub$adjr2)
+)
+# model selection using adjested rsqr criterion
+result$Adj.R2
+
+#final model
+DV3.model3 <- DV3 ~ IV3 + IV4 + IV5 + IV6 + IV8 + IV9 + IV10 + IV11 + IV12 + IV13 + IV14+IV15+ IV17+ IV19+ IV20 + IV21
+
+####################### 1 stnd error rule######
+set.seed(123)
+# Set up repeated k-fold cross-validation
+train.control <- trainControl(method = "cv", number = 3)
+# Train the model
+step.model <- train(DV3 ~., data = DV3.explain.X,
+                    method = "leapBackward", 
+                    tuneGrid = data.frame(nvmax = 1:26),
+                    trControl = train.control
+                    )
+step.model$results
+rmse.cutoff <- min(step.model$results$RMSE) 
+
+#applying 1 standard error rule
+min.rmse <- min(step.model$results$RMSE)
+min.rmsesd <- step.model$results[which.min(step.model$results$RMSE),'RMSESD']
+
+rmse.cutoff <- min.rmse + min.rmsesd
+
+plot(c(1:26), step.model$results$RMSE)
+abline(h=rmse.cutoff,lty=2)
+p<- ggplot(step.model$results, aes(x=nvmax, y=RMSE)) + 
+  geom_line() +
+  geom_point()+
+  geom_errorbar(aes(ymin=RMSE-RMSESD, ymax=RMSE+RMSESD), width=.2,
+                 position=position_dodge(0.05))
+print(p)
+# Finished line plot
+p <- p+labs(title="1 se rule", x="number of variables", y = "RMSE")+
+   theme_classic() +
+   scale_color_manual(values=c('#999999','#E69F00'))
+p + geom_hline(yintercept=rmse.cutoff, linetype="dashed", color = "red")
+
+# model with 7 parameters has least rmse values under 1 standard deviation of minimum rmse model which is model with 9 parameters
+# printing the model 3
+
+coef(step.model$finalModel,3)
+DV3.model4 <- DV3~ IV5+IV10+IV12
+
+## model 2 and 4 are the same
+
+
+################################ PREDICTION STEP ###########################
+DV3.predict.X <- set.predict %>% 
+  dplyr::select(IV1, IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV29, IV28, DV3)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Set up repeated k-fold cross-validation
+# repeated k-fold repeats the k-fold cross-validation for the desired times for reilable accuracy 
+# I tried different vales of K and repeats and fimally settled for k=5, repeats=3
+
+train.control <- trainControl(method = "repeatedcv", number = 3, repeats = 5)
+
+# Train the model with all the predictors
+step.model0 <- train(DV3 ~ ., data = DV3.predict.X, method = "lm", trControl = train.control)
+
+
+# printing the results where astrick shows the significant coeficient for the variable
+summary(step.model0)
+coef(step.model0$finalModel)
+
+
+
+# testing with the three models (model2 and model4 are same) from "explain" step
+step.model1 <- train(DV3.model1, data = DV3.predict.X, method = "lm", trControl = train.control)
+step.model2 <- train(DV3.model2, data = DV3.predict.X, method = "lm", trControl = train.control)
+step.model3 <- train(DV3.model3, data = DV3.predict.X, method = "lm", trControl = train.control)
+step.model4 <- train(DV3.model4, data = DV3.predict.X, method = "lm", trControl = train.control)
+
+# applying one standard deviation rule using RMSE criterion
+pred.mod.results <- rbind( step.model4$results, step.model2$results, step.model1$results, step.model3$results, step.model0$results)
+pred.mod.results
+
+p<- ggplot(pred.mod.results, aes(x=c(3, 5,11, 16, 26), y=RMSE)) + 
+  geom_line() +
+  geom_point()+
+  geom_errorbar(aes(ymin=RMSE-RMSESD, ymax=RMSE+RMSESD), width=.2,
+                 position=position_dodge(0.1))
+# Finished line plot
+p+labs(title="1 se rule", x="number of variables", y = "RMSE")+
+   theme_classic() +
+   scale_color_manual(values=c('#999999','#E69F00'))
+# one-standard-error rule: calculate the standard error of the estimated test MSE for each model size, and then select the smallest model for which the estimated test error is within one standard error of the lowest point on the curve. Here, model with 7 parameters has least rmse values under 1 standard deviation of minimum rmse model which is model with 9 parameters
+
+# printing coeficient for the best predictive model
+coef(step.model2$finalModel)
+
+
+```
+
+#### model1<- DV3~ IV4 + IV5 + IV6 + IV8 + IV9 + IV10 + IV11 + IV12 + IV14 + IV15 + IV19
+#### model2 <- DV3 ~ IV5 +IV6 +IV10 +IV11 +IV12(final model)
+#### model3 <- DV3 ~ IV3 + IV4 + IV5 + IV6 + IV8 + IV9 + IV10 + IV11 + IV12 + IV13 + IV14 + IV15 + IV17 + IV19 + IV20 + IV21
+#### model4 <- DV3 ~ IV5 + IV10 + IV12
+
+#### Significant variables by name ####
+#### IV4	FFM!
+#### IV5	ASTI
+#### IV6	Mscale
+#### IV7	NETI
+#### IV8	PNSE
+#### IV9	IOS
+#### IV12	SCS
+#### IV17	TIPI_N
+#### IV20	BEIS
+#### IV24	Age
+
+```{r}
+#DV4 - Envy resentment
+DV4.explain.X <- set.explain %>% 
+  dplyr::select(IV1, IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV29, IV28, DV4)
+
+## model1- backward and forward selection using p-value
+fitall <- lm(DV4~., data= DV4.explain.X)
+#summary(fitall)
+#backward elimination at p>0.05
+model.backward.p <- ols_step_backward_p(fitall, prem= 0.05, details = TRUE)
+model.backward.p$model
+lm1 = as.formula(paste(colnames(model.backward.p$model$model)[1], "~", paste(colnames(model.backward.p$model$model)[-1], collapse = " + ")))
+#farward selection at p<0.05
+#model.forward.p <- ols_step_forward_p(fitall, penter= 0.05, details = TRUE)
+# final model
+#model.forward.p$model
+
+# both processes converging to the same model
+DV4.model1 <- DV4~ IV3 + IV5 +IV6 +IV10+IV12 +IV13 +IV14 +IV15 +IV17
+
+## model2- using BIC criterion
+#backward selection
+#here log(n) is used for BIC as elemination criterion
+n<- nrow(DV4.explain.X)
+model.bic.backward<-stepAIC(fitall, scope = list(upper = fitall, lower = ~1), direction = "backward",
+k = log(n), trace = TRUE)
+lm2 = as.formula(paste(colnames(model.bic.backward$model)[1], "~", paste(colnames(model.bic.backward$model)[-1], collapse = " + ")))
+summary(model.bic.backward)
+#forward selection
+#fit0 <- lm(DV4 ~ 1, data = DV4.explain.X) 
+#model.bic.forward<-stepAIC(fit0, scope = list(upper = fitall, lower = ~1), direction = "forward",
+#k = log(n), trace = TRUE)
+#summary(model.bic.forward)
+# printing final model for backward selection
+model.bic.backward$coefficients
+# printing final model for forward selection
+#model.bic.forward$coefficients
+
+#Both models are not converging. Choosing the backward elimination model here
+DV4.model2 <- DV4 ~ IV3 + IV5 +IV6 +IV10 +IV12 +IV14 +IV17
+
+################## Exhaustive search- adj-rsqr
+sub_set <- regsubsets(DV4 ~ ., data = DV4.explain.X, nbest = 1,
+nvmax = 26, method = "exhaustive")
+sum_sub <- summary(sub_set)
+#sum_sub
+plot(sub_set)
+# saving best models based on different criterias (R2, Adj. R2, CP, BIC)
+result<-data.frame(
+  Adj.R2 = which.max(sum_sub$adjr2)
+)
+# model selection using adjested rsqr criterion
+
+all.pred.status <- summary(sub_set)$which[result$Adj.R2,-1]
+predictors <- names(which(all.pred.status == TRUE))
+predictors <- paste(predictors, collapse = "+")
+lm3<-as.formula(paste0("DV4", "~", predictors))
+DV4.model3 <-as.formula(paste0("DV4", "~", predictors)) #final model
+
+
+####################### 1 stnd error rule######
+set.seed(123)
+# Set up repeated k-fold cross-validation
+train.control <- trainControl(method = "repeatedcv", number = 3, repeats = 5)
+# Train the model
+step.model <- train(DV4 ~., data = DV4.explain.X,
+                    method = "leapBackward", 
+                    tuneGrid = data.frame(nvmax = 1:26),
+                    trControl = train.control
+                    )
+step.model$results 
+
+#applying 1 standard error rule
+min.rmse <- min(step.model$results$RMSE)
+min.rmsesd <- step.model$results[which.min(step.model$results$RMSE),'RMSESD']
+
+rmse.cutoff <- min.rmse + min.rmsesd
+considered.models <- step.model$results[step.model$results$RMSE<rmse.cutoff,]
+
+
+predictors <- paste(names(coef(step.model$finalModel,considered.models$nvmax[1]))[-1], collapse = "+")
+lm4<-as.formula(paste0("DV4", "~", predictors))
+
+plot(c(1:26), step.model$results$RMSE)
+abline(h=rmse.cutoff,lty=2)
+p<- ggplot(step.model$results, aes(x=nvmax, y=RMSE)) + 
+  geom_line() +
+  geom_point()+
+  geom_errorbar(aes(ymin=RMSE-RMSESD, ymax=RMSE+RMSESD), width=.2,
+                 position=position_dodge(0.05))
+print(p)
+# Finished line plot
+p+labs(title="1 se rule", x="number of variables", y = "RMSE")+
+   theme_classic() +
+   scale_color_manual(values=c('#999999','#E69F00'))
+# model with 7 parameters has least rmse values under 1 standard deviation of minimum rmse model which is model with 9 parameters
+# printing the model 3
+
+#coef(step.model$finalModel,3)
+#DV4.model4 <- DV4~ IV10 +IV12+IV17
+## model 2 and 4 are the same
+
+
+################################ PREDICTION STEP ###########################
+DV4.predict.X <- set.predict %>% 
+  dplyr::select(IV1, IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV29, IV28, DV4)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Set up repeated k-fold cross-validation
+# repeated k-fold repeats the k-fold cross-validation for the desired times for reilable accuracy 
+# I tried different vales of K and repeats and fimally settled for k=5, repeats=3
+
+train.control <- trainControl(method = "repeatedcv", number = 3, repeats = 5)
+
+# Train the model with all the predictors
+step.model0 <- train(DV4 ~ ., data = DV4.predict.X, method = "lm", trControl = train.control)
+
+
+
+# testing with the three models (model2 and model4 are same) from "explain" step
+step.model1 <- train(lm1, data = DV4.predict.X, method = "lm", trControl = train.control)
+step.model2 <- train(lm2, data = DV4.predict.X, method = "lm", trControl = train.control)
+step.model3 <- train(lm3, data = DV4.predict.X, method = "lm", trControl = train.control)
+step.model4 <- train(lm4, data = DV4.predict.X, method = "lm", trControl = train.control)
+
+# gives the best model
+mod.list<- list(
+step.model1$finalModel, 
+step.model2$finalModel, 
+step.model3$finalModel, 
+step.model4$finalModel )
+
+# applying one standard deviation rule using RMSE criterion
+#pred.mod.results <- rbind( step.model4$results, step.model2$results, step.model1$results, step.model3$results, step.model0$results)
+
+pred.mod.results <- rbind(  step.model1$results, step.model2$results, step.model3$results, step.model4$results)
+final.model <- mod.list[which.min(pred.mod.results$RMSE)]
+
+p<- ggplot(pred.mod.results, aes(x=c(3, 7, 9, 14, 26), y=RMSE)) + 
+  geom_line() +
+  geom_point()+
+  geom_errorbar(aes(ymin=RMSE-RMSESD, ymax=RMSE+RMSESD), width=.2,
+                 position=position_dodge(0.05))
+print(p)
+# Finished line plot
+p+labs(title="1 se rule", x="number of variables", y = "RMSE")+
+   theme_classic() +)
+   scale_color_manual(values=c('#999999','#E69F00'))
+# one-standard-error rule: calculate the standard error of the estimated test MSE for each model size, and then select the smallest model for which the estimated test error is within one standard error of the lowest point on the curve. Here, model with 7 parameters has least rmse values under 1 standard deviation of minimum rmse model which is model with 9 parameters
+
+# printing coeficient for the best predictive model
+coef(step.model2$finalModel)
+
+
+```
+
+#### model1<- DV4~ IV3 + IV4 + IV5 +IV6 +IV12 +IV16 +IV17 +IV20 +IV24
+#### model2 <- DV4 ~ IV4 + IV5 +IV6 +IV12 +IV17 +IV20 +IV24 (final model)
+#### model3 <- DV4 ~ IV3 + IV4 + IV5 + IV6 + IV7 + IV8 + IV9 + IV10 + IV12 + IV16 + IV17+ IV19+ IV20 + IV24 + IV29
+#### model4 <- DV4~ IV4  + IV5 + IV6 + IV12 + IV17 + IV20 + IV24
+
+#### Significant variables by name ####
+#### IV4	FFM!
+#### IV5	ASTI
+#### IV6	Mscale
+#### IV7	NETI
+#### IV8	PNSE
+#### IV9	IOS
+#### IV12	SCS
+#### IV17	TIPI_N
+#### IV20	BEIS
+#### IV24	Age

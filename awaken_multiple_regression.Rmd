@@ -1,0 +1,166 @@
+---
+title: "awakenp_multiple_reg"
+author: "Arti Thakur"
+date: "1/23/2022"
+output: html_document
+---
+
+```{r, eval = TRUE, include = FALSE}
+rm(list=ls(all=TRUE))
+
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(ggrepel)
+library(stringr)
+library(knitr)
+library(CCA)
+library(CCP)
+library(readxl)
+library(caret)
+library(heplots)
+library(leaps)
+library(olsrr)
+library(flexmix)
+library(Hmisc)
+```
+
+### 1. Load the data and split in two half
+```{r, eval = TRUE, include = FALSE}
+
+data = read_xlsx("../data/Dataset_with_questions_Sep1_2022.xlsx")
+
+summary(data)
+
+# Set seed for reproducibility (123, 5682, 19084, 1342, 3464, 917829235, 346893457, 345724, 899572, 92585623)
+set.seed(917829235)
+#Spliting the data in "explain" and "predict" sets
+index = createDataPartition(data$DigitalImmPROXY, p = 0.50, list = FALSE)
+set.explain = data[index, ]
+set.predict = data[-index, ]
+
+```
+
+### This part of the code run and save the explainatory models
+## explain.models have all four explanatory models saved
+## Note: For each DV, manually replace the DV name. there would be 5 replacements in total
+```{r}
+  
+explain.models <- vector(mode="list", length=4) 
+predict.models <- vector(mode="list", length=4)
+var_names <- c("FFMQ1",	"FFMQ2",	"FFMQ3",	"FFMQ4",	"FFMQ5",	"FFMQ6",	"FFMQ7",	"FFMQ8",	"FFMQ9",	"FFMQ10",	"SCS1",	"SCS2",	"SCS3",	"SCS4",	"SCS5",	"SCS6",	"SCS7",	"SCS8",	"SCS9",	"SCS10",	"TIPIemoStab1",	"TIPIemoStab2", "NETI1" , "NETI2" , "NETI3" , "NETI4" , "NETI5" , "NETI6" , "NETI7" , "NETI8" , "NETI9" , "NETI10" , "NETI11" , "NETI12" , "PNSE1" , "PNSE2" , "PNSE3" , "PNSE4" , "PNSE5" , "IOS1" , "IOS2" , "Mscale1" , "Mscale2" , "Mscale3" , "Mscale4" , "Mscale5" , "Mscale6" , "Mscale7" , "GQ1" , "GQ2" , "GQ3" , "GQ4" , "GQ5" , "GQ6" , "BEIS1" , "BEIS2" , "BEIS3" , "BEIS4" , "BEIS5" , "BEIS6" , "BEIS7" , "BEIS8" , "BEIS9" , "BEIS10" , "TIPIopen1" , "TIPIopen2" , "IRI1" , "IRI2" , "IRI3" , "IRI4" , "IRI5" , "IRI6" , "IRI7" , "Age" , "Edu" , "StagesFourBins" , "StagesBinary4.5", "DigitalImmPROXY")
+# explain.X <- set.explain %>% 
+#   dplyr::select(IV1, IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV29, IV28, DV9)
+
+explain.X <- set.explain %>% dplyr::select(var_names)
+
+
+## model1- backward and forward selection using p-value
+fitall <- lm(DigitalImmPROXY~., data= explain.X)
+summary(fitall)
+#backward elimination at p>0.05
+model.backward.p <- ols_step_backward_p(fitall, prem= 0.01, details = TRUE)
+model.backward.p$model
+
+#same the model
+explain.models[[1]] <- as.formula(paste(colnames(model.backward.p$model$model)[1], "~", paste(colnames(model.backward.p$model$model)[-1], collapse = " + ")))
+
+
+
+## model2- using BIC criterion
+#backward elemination
+#here log(n) is used for BIC as elemination criterion
+n<- nrow(explain.X)
+model.bic.backward<-stepAIC(fitall, scope = list(upper = fitall, lower = ~1), direction = "backward",
+k = log(n), trace = TRUE)
+explain.models[[2]] <- as.formula(paste(colnames(model.bic.backward$model)[1], "~", paste(colnames(model.bic.backward$model)[-1], collapse = " + ")))
+#summary(model.bic.backward)
+
+
+################## Exhaustive search for adj-rsqr model #####
+# sub_set <- regsubsets(DigitalImmPROXY~., data= explain.X, nbest = 1,
+# nvmax = 75, method = "exhaustive", really.big=T)
+# sum_sub <- summary(sub_set)
+# #sum_sub
+# plot(sub_set)
+# # saving best models of different sizes based on Adj. R2
+# result<-data.frame(
+#   Adj.R2 = which.max(sum_sub$adjr2)
+# )
+# # final model selection using adjested rsqr criterion
+# all.pred.status <- summary(sub_set)$which[result$Adj.R2,-1]
+# predictors <- names(which(all.pred.status == TRUE))
+# predictors <- paste(predictors, collapse = "+")
+# explain.models[[3]] <-as.formula(paste0(colnames(model.bic.backward$model)[1], "~", predictors))
+
+
+####################### 1 stnd error rule######
+set.seed(123)
+# Set up repeated k-fold cross-validation
+train.control <- trainControl(method = "repeatedcv", number = 3, repeats = 5)
+# Train the model
+step.model <- train(DigitalImmPROXY ~., data = explain.X,
+                    method = "leapBackward", 
+                    tuneGrid = data.frame(nvmax = 1:77),
+                    trControl = train.control
+                    )
+step.model$results 
+
+##applying 1 standard error rule and choose the most parsimonious model within one std deviation of least rmse model
+#find minimum rmse and rmsesd
+min.rmse <- min(step.model$results$RMSE)
+min.rmsesd <- step.model$results[which.min(step.model$results$RMSE),'RMSESD']
+
+# compute the threshold
+rmse.cutoff <- min.rmse + min.rmsesd
+considered.models <- step.model$results[step.model$results$RMSE<rmse.cutoff,]
+
+
+predictors <- paste(names(coef(step.model$finalModel,considered.models$nvmax[1]))[-1], collapse = "+")
+explain.models[[4]] <-as.formula(paste0(colnames(model.bic.backward$model)[1], "~", predictors))
+
+# plot(c(1:77), step.model$results$RMSE)
+# abline(h=rmse.cutoff,lty=2)
+# p<- ggplot(step.model$results, aes(x=nvmax, y=RMSE)) + 
+#   geom_line() +
+#   geom_point()+
+#   geom_errorbar(aes(ymin=RMSE-RMSESD, ymax=RMSE+RMSESD), width=.2,
+#                  position=position_dodge(0.05))
+# print(p)
+# # Finished line plot
+# p+labs(title="1 se rule", x="number of variables", y = "RMSE")+
+#    theme_classic() +
+#    scale_color_manual(values=c('#999999','#E69F00'))
+
+
+
+
+################################ PREDICTION STEP ###########################
+
+# predict.X <- set.predict %>% 
+#   dplyr::select(IV1, IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV29, IV28, DV9)
+predict.X <- set.predict %>% dplyr::select(var_names)
+
+
+
+# Set up repeated k-fold cross-validation
+# repeated k-fold repeats the k-fold cross-validation for the desired times for reilable accuracy 
+# I tried different vales of K and repeats and finally settled for k=3, repeats=5
+
+train.control <- trainControl(method = "repeatedcv", number = 3, repeats = 5)
+# testing with the four models from "explain" step
+for (each in c(1,2,4)){
+  predict.models[[each]]<- train(explain.models[[each]], data = predict.X, method = "lm", trControl = train.control)
+}
+
+# model selection using minimum RMSE criterion
+#pred.mod.results <- rbind( step.model4$results, step.model2$results, step.model1$results, step.model3$results, step.model0$results)
+
+pred.mod.results <- rbind(  predict.models[[1]]$results, predict.models[[2]]$results, predict.models[[3]]$results, predict.models[[4]]$results)
+
+#printing final model
+#predict.models[[which.min(pred.mod.results$RMSE)]]$finalModel
+#summary(predict.models[[3]]$finalModel)
+summary(predict.models[[which.min(pred.mod.results$RMSE)]]$finalModel)
+
+```

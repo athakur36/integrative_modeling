@@ -1,0 +1,798 @@
+---
+title: "CCA K-Fold Test Run"
+author: "Arti Thakur"
+date: "11/7/2021"
+output: pdf_document
+---
+
+Analysis plan:
+1. first randomly split the 1165 participants into 5 nearly-equal sized groups. Of the 5 groups, 4 groups were used as training data, the remaining single group were retained as the validation data for testing the CCA model.
+2. The cross-validation process was repeated 5 times, with each of the 5 groups used exactly once as
+the validation/testing data. Each time, CCA was run on training data, then the CCA canonical
+vectors (A and B) computed from the training data were multiplied into the IVs (X) and
+DVs (Y) matrices of the testing data, resulting in subject weight vectors U and V for the testing
+data. Finally, for each cross-validation run, we correlated the U and V of the testing data, then averaged the correlations across the 5 folds.
+
+1. Import and Summary Statistics:
+
+```{r, eval = FALSE, include = FALSE}
+rm(list=ls(all=TRUE))
+
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(ggrepel)
+library(stringr)
+library(knitr)
+library(CCA)
+library(CCP)
+library(readxl)
+library(caret)
+library(heplots)
+library(GGally)
+library(ggplot2)
+library(ggcorrplot)
+```
+
+```{r, eval=FALSE}
+data = read_xlsx("../data/AggregateData_Dec14.xlsx")
+summary(data)
+``` 
+
+
+```{r}
+#check for assumptions
+
+```
+
+3. Randomly Splitting the data in to 5 subsets
+```{r}
+set.seed(917829235)
+ss <- sample(rep(1:5, diff(floor(nrow(data) * c(0, 0.2, 0.4, 0.6, 0.8, 1.0)))))
+data_cca1 <- data[ss==1,]
+data_cca2 <- data[ss==2,]
+data_cca3 <- data[ss==3,]
+data_cca4 <- data[ss==4,]
+data_cca5 <- data[ss==5,]
+```
+
+4. Now repeat the following steps for each subset taken as testing and
+4a) run the canonical corelation for training set
+4b) compute the F stat for the training set
+4c) fit the model we obtained during training to the test-set
+4d) compute the F stat for the testing set, 
+4e) Compare the r-square for both test and training
+4f) save the r-square of the test set for final evaluation
+
+Step 4a for data_cca1 as test set
+
+
+
+```{r}
+# merging the rest of the subsets for training set
+
+trainingset1 <- rbind(data_cca2, data_cca3, data_cca4, data_cca5)
+
+#saving the data for SPSS
+write.csv(trainingset1, file = "CC_trainingset1.csv")
+
+#seperating the X and Y for canonical correltation
+train.fold1.X <- trainingset1 %>% 
+  dplyr::select(IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV29, IV28)
+
+#train.fold1.Y <- trainingset1 %>% 
+#  dplyr::select(DV1, DV2, DV3, DV3, DV4, DV5, DV6, DV7, DV7t, DV8, DV9, DV10, DV11, DV12, DV13, DV14, #DV16, DV18, DV20, DV21, DV22, DV23, DV24, DV25, DV26, DV27, DV28)
+
+train.fold1.Y <- trainingset1 %>% 
+  dplyr::select(DV1, DV2, DV3, DV3, DV4, DV5)
+```
+
+4a) running canonical correltaion on the training set
+```{r}
+#describing data
+#ggpairs(X)
+#ggpairs(Y) 
+
+#corelations
+r<-data.frame(cor(train.fold1.X))
+#ggcorrplot(r)
+
+# Canonical correlation
+cc1_fold1 <- cc(train.fold1.X, train.fold1.Y)
+
+# Raw canonical coefficients
+cc1_fold1[1:4]
+
+# Compute canonical loadings
+cc2_fold1 <- comput(train.fold1.X, train.fold1.Y, cc1_fold1)
+
+# Display canonical loadings
+cc2_fold1[3:6]
+
+rawx.fold1 <- data.frame(cc1_fold1[3])
+rawy.fold1 <- data.frame(cc1_fold1[4])
+
+
+LCx.fold1 <- as.matrix(train.fold1.X) %*% as.matrix(rawx.fold1)
+LCy.fold1 <- as.matrix(train.fold1.Y) %*% as.matrix(rawy.fold1)
+
+cor(LCx.fold1) # this should be 0
+cor(LCy.fold1) # this should be 0
+
+```
+```{r}
+# checking of the variates are significant
+# tests of canonical dimensions
+train.fold1.rho <- cc1_fold1$cor
+
+## Define number of observations, number of variables in first set, and number of variables in the second set.
+## Calculate p-values using the F-approximations of different test statistics:
+# Tests of canonical dimensions
+
+train.fold1.n <- dim(train.fold1.X)[1]
+train.fold1.p <- length(train.fold1.X)
+train.fold1.q <- length(train.fold1.Y)
+
+p.asym(train.fold1.rho, train.fold1.n, train.fold1.p, train.fold1.q, tstat = "Wilks")
+
+# the first row in the table corrosponds to the first test of the canonical dimensions tests whether all 24 dimensions are significant (they are, F = 5.12), the next test tests whether dimensions 2 to 24 combined are significant (they are, F = 3.1) and so on. Seems like first 7 combinations are significant (suggesting that ther4e could be 7 underlying latent constructs).
+
+# eigen value: largest squared correlation /(1- largest squared correlation)
+# sources: https://stats.oarc.ucla.edu/spss/output/canonical-correlation-analysis/
+# eigen value to var. explained calculation: https://www.youtube.com/watch?fbclid=IwAR2d0SmdeBtAhkJ523e0yClNPJgj8TnXuwyif21j8Ap1hoJcvOY-OY-bRa4&v=V_LwggWX0tk&feature=youtu.be
+
+cc1_fold1.ev <- (cc1_fold1$cor^2)/(1-cc1_fold1$cor^2)
+train.fold1.rsq <- cc1_fold1.ev/sum(cc1_fold1.ev)
+
+#comupting total variance explained by the first 7 variates as those are significant
+sum(train.fold1.rsq[1:5])
+
+# 92% of the variance is explained by first 7 variates for the training set.
+
+
+
+# standardized  canonical coefficients diagonal matrix of X standard deviation's
+s1 <- diag(sqrt(diag(cov(train.fold1.X))))
+s1 %*% cc1_fold1$xcoef
+
+# standardized  canonical coefficients diagonal matrix of Y sd's
+s2 <- diag(sqrt(diag(cov(train.fold1.Y))))
+round(s2 %*% cc1_fold1$ycoef,2)
+
+# we use std coeffecients only for the interpretation purposes and use raw coefficients for fit the test data
+
+# we interpret these coefficient same way as we do for regression using variate as the DV. For example, we can say that 1 unit increase in IV1 leads to -.40 unit decrease in the first variate. However, in order to see if these coefficients are significant, we check the canonical loadings. Canonical loadings signify how much are these variable are loading on the variate. The difference between canonical coefficint and the loadings is that in the case of CC the predictors assume the presence of other predictors in the equation whereas loadings does not assume that. CL(corr.X.xscores and corr.Y.yscores) tell you how much a particular variable corelates with the latent variate. SO if the loading is above .3 it is considered as moderate and that coefficient is considered as significant. Cross-loadings (corr.Y.xscores, corr.X.yscores) signify the strength of correlation between one side variable and the other side latent construct (hence should be verified to see if the variables are loading more on the opposite side latent variable). Note*- loadings should always be greter than the cross-loadings.
+
+```
+```{r}
+#fitting the model to the test data now
+
+# Creating linear combinations
+# As matrices
+
+test.fold1.X <- data_cca1 %>% 
+  dplyr::select(IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV29, IV28)
+
+#test.fold1.Y <- data_cca1 %>% 
+#  dplyr::select(DV1, DV2, DV3, DV3, DV4, DV5, DV6, DV7, DV7t, DV7ph, DV8, DV9, DV10, DV11, DV12, DV13, DV14, DV16, DV18, DV20, DV21, DV22, DV23, DV24, DV25, DV27, DV28)
+
+test.fold1.Y <- data_cca1 %>% 
+  dplyr::select(DV1, DV2, DV3, DV3, DV4, DV5)
+                
+rawx.fold1 <- data.frame(cc1_fold1[3])
+rawy.fold1 <- data.frame(cc1_fold1[4])
+
+
+LCx.fold1 <- as.matrix(test.fold1.X) %*% as.matrix(rawx.fold1)
+LCy.fold1 <- as.matrix(test.fold1.Y) %*% as.matrix(rawy.fold1)
+
+
+#Computing variates for the test set
+test.variates.fold1 <- c()
+for (each in (1:ncol(LCx.fold1))){
+  test.variates.fold1 <- c(test.variates.fold1, cor(LCx.fold1[,each], LCy.fold1[,each]))
+}
+test.variates.fold1
+
+test.fold1.ev <- (test.variates.fold1^2)/(1-test.variates.fold1^2)
+test.fold1.rsq <- test.fold1.ev/sum(test.fold1.ev)
+
+#comupting toral variance explained by the first 7 variates as those are significant
+sum(test.fold1.rsq[1:5])
+```
+```{r}
+# checking of the variates are significant for the test set
+# tests of canonical dimensions
+test.fold1.rho <- test.variates.fold1
+## Define number of observations, number of variables in first set, and number of variables in the second set.
+test.fold1.n <- dim(test.fold1.X)[1]
+test.fold1.p <- length(test.fold1.X)
+test.fold1.q <- length(test.fold1.Y)
+
+## Calculate p-values using the F-approximations of different test statistics:
+wilk.sig.fold1<-p.asym(test.fold1.rho, test.fold1.n, test.fold1.p, test.fold1.q, tstat = "Wilks")
+
+# None of the corelation is significant for the test set if we put all the DVs. However, 1 is turning significant if I put first 5 DVs.
+```
+
+
+Results: Out of 24 variates/dimensions first 7 were found to be significant for the training set explaining 92% of the variance between two sets. However, None was significant for the test set.
+
+###################################################################################
+#                                                                                 #
+#                     running the 4 step for the second fold                      #
+#                                                                                 #
+###################################################################################
+
+Step 4a for data_cca2 as test set
+```{r}
+# merging the rest of the subsets for training set
+
+trainingset2 <- rbind(data_cca1, data_cca3, data_cca4, data_cca5)
+
+#seperating the X and Y for canonical correltation
+train.fold2.X <- trainingset2 %>% 
+  dplyr::select(IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV28, IV29)
+
+#train.fold2.Y <- trainingset2 %>% 
+#  dplyr::select(DV1, DV2, DV3, DV3, DV4, DV5, DV6, DV7, DV7t, DV7ph, DV8, DV9, DV10, DV11, DV12, DV13, DV14, DV16, DV18, DV20, DV21, DV22, DV23, DV24, DV25, DV27, DV28)
+
+train.fold2.Y <- trainingset2 %>% 
+  dplyr::select(DV1, DV2, DV3, DV3, DV4, DV5)
+```
+
+4a) running canonical correltaion on the training set
+```{r}
+#describing data
+#ggpairs(X)
+#ggpairs(Y) 
+
+#corelations
+r<-data.frame(cor(train.fold2.X))
+#ggcorrplot(r)
+
+# Canonical correlation
+cc1_fold2 <- cc(train.fold2.X, train.fold2.Y)
+
+# Raw canonical coefficients
+cc1_fold2[1:4]
+
+# Compute canonical loadings
+cc2_fold2 <- comput(train.fold2.X, train.fold2.Y, cc1_fold2)
+
+# Display canonical loadings
+cc2_fold2[3:6]
+
+rawx.fold2 <- data.frame(cc1_fold2[3])
+rawy.fold2 <- data.frame(cc1_fold2[4])
+
+
+LCx.fold2 <- as.matrix(train.fold2.X) %*% as.matrix(rawx.fold2)
+LCy.fold2 <- as.matrix(train.fold2.Y) %*% as.matrix(rawy.fold2)
+
+cor(LCx.fold2) # this should be 0
+cor(LCy.fold2) # this should be 0
+```
+```{r}
+# checking of the variates are significant
+# tests of canonical dimensions
+train.fold2.rho <- cc1_fold2$cor
+
+## Define number of observations, number of variables in first set, and number of variables in the second set.
+## Calculate p-values using the F-approximations of different test statistics:
+# Tests of canonical dimensions
+
+train.fold2.n <- dim(train.fold2.X)[1]
+train.fold2.p <- length(train.fold2.X)
+train.fold2.q <- length(train.fold2.Y)
+
+p.asym(train.fold2.rho, train.fold2.n, train.fold2.p, train.fold2.q, tstat = "Wilks")
+
+# the first row in the table corrosponds to the first test of the canonical dimensions tests whether all 24 dimensions are significant (they are, F = 5.12), the next test tests whether dimensions 2 to 24 combined are significant (they are, F = 3.1) and so on. Seems like first 7 combinations are significant (suggesting that ther4e could be 7 underlying latent constructs).
+
+# eigen value: largest squared correlation /(1- largest squared correlation)
+# sources: https://stats.oarc.ucla.edu/spss/output/canonical-correlation-analysis/
+# eigen value to var. explained calculation: https://www.youtube.com/watch?fbclid=IwAR2d0SmdeBtAhkJ523e0yClNPJgj8TnXuwyif21j8Ap1hoJcvOY-OY-bRa4&v=V_LwggWX0tk&feature=youtu.be
+
+cc1_fold2.ev <- (cc1_fold2$cor^2)/(1-cc1_fold2$cor^2)
+train.fold2.rsq <- cc1_fold2.ev/sum(cc1_fold2.ev)
+
+#comupting toral variance explained by the first 7 variates as those are significant
+sum(train.fold2.rsq[1:7])
+
+# 92% of the variance is explained by first 7 variates for the training set.
+
+
+
+# standardized  canonical coefficients diagonal matrix of X standard deviation's
+s1 <- diag(sqrt(diag(cov(train.fold2.X))))
+s1 %*% cc1_fold2$xcoef
+
+# standardized  canonical coefficients diagonal matrix of Y sd's
+s2 <- diag(sqrt(diag(cov(train.fold2.Y))))
+round(s2 %*% cc1_fold2$ycoef,2)
+
+# we use std coeffecients only for the interpretation purposes and use raw coefficients for fit the test data
+
+# we interpret these coefficient same way as we do for regression using variate as the DV. For example, we can say that 1 unit increase in IV1 leads to -.40 unit decrease in the first variate. However, in order to see if these coefficients are significant, we check the canonical loadings. Canonical loadings signify how much are these variable are loading on the variate. The difference between canonical coefficint and the loadings is that in the case of CC the predictors assume the presence of other predictors in the equation whereas loadings does not assume that. CL(corr.X.xscores and corr.Y.yscores) tell you how much a particular variable corelates with the latent variate. SO if the loading is above .3 it is considered as moderate and that coefficient is considered as significant. Cross-loadings (corr.Y.xscores, corr.X.yscores) signify the strength of correlation between one side variable and the other side latent construct (hence should be verified to see if the variables are loading more on the opposite side latent variable). Note*- loadings should always be greter than the cross-loadings.
+
+```
+```{r}
+#fitting the model to the test data now
+
+# Creating linear combinations
+# As matrices
+
+test.fold2.X <- data_cca2 %>% 
+  dplyr::select(IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV28, IV29)
+
+#test.fold2.Y <- data_cca2 %>% 
+#  dplyr::select(DV1, DV2, DV3, DV3, DV4, DV5, DV6, DV7, DV7t, DV7ph, DV8, DV9, DV10, DV11, DV12, DV13, DV14, DV16, DV18, DV20, DV21, DV22, DV23, DV24, DV25, DV27, DV28)
+
+test.fold2.Y <- data_cca2 %>% 
+  dplyr::select(DV1, DV2, DV3, DV3, DV4, DV5)
+
+test.LCx <- as.matrix(test.fold2.X) %*% as.matrix(rawx.fold2)
+test.LCy <- as.matrix(test.fold2.Y) %*% as.matrix(rawy.fold2)
+
+
+
+#Computing variates for the test set
+test.variates.fold2 <- c()
+for (each in (1:ncol(test.LCx))){
+  test.variates.fold2 <- c(test.variates.fold2, cor(test.LCx[,each], test.LCy[,each]))
+}
+test.variates.fold2
+
+test.fold2.ev <- (test.variates.fold2^2)/(1-test.variates.fold2^2)
+test.fold2.rsq <- test.fold2.ev/sum(test.fold2.ev)
+
+#comupting toral variance explained by the first 7 variates as those are significant
+sum(fold2.rsq[1:7])
+```
+```{r}
+# checking of the variates are significant for the test set
+# tests of canonical dimensions
+test.fold2.rho <- test.variates.fold2
+## Define number of observations, number of variables in first set, and number of variables in the second set.
+test.fold2.n <- dim(test.fold2.X)[1]
+test.fold2.p <- length(test.fold2.X)
+test.fold2.q <- length(test.fold2.Y)
+
+## Calculate p-values using the F-approximations of different test statistics:
+wilk.sig.fold2<-p.asym(test.fold2.rho, test.fold2.n, test.fold2.p, test.fold2.q, tstat = "Wilks")
+
+# None of the corelation is significant for the test set if we put all the DVs. However, 1 is turning significant if I put first 5 DVs.
+```
+
+###################################################################################
+#                                                                                 #
+#                     running the fourth step for the 3rd fold                      #
+#                                                                                 #
+###################################################################################
+
+#data_cca3 as test set
+```{r}
+# merging the rest of the subsets for training set
+
+trainingset3 <- rbind(data_cca1, data_cca2, data_cca4, data_cca5)
+
+#seperating the X and Y for canonical correltation
+train.fold3.X <- trainingset3 %>% 
+  dplyr::select(IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV28, IV29)
+
+train.fold3.Y <- trainingset3 %>% 
+  dplyr::select(DV1, DV2, DV3, DV3, DV4, DV5)
+
+#train.fold3.Y <- trainingset3 %>% 
+#  dplyr::select(DV1, DV2, DV3, DV3, DV4, DV5, DV6, DV7, DV7t, DV8, DV9, DV10, DV11, DV12, DV13, DV14, DV16, DV18, DV20, DV21, DV22, DV23, DV24, DV25, DV27, DV28)
+```
+
+4a) running canonical correltaion on the training set
+```{r}
+#describing data
+#ggpairs(X)
+#ggpairs(Y) 
+
+#corelations
+r<-data.frame(cor(train.fold3.X))
+#ggcorrplot(r)
+
+# Canonical correlation
+cc1_fold3 <- cc(train.fold3.X, train.fold3.Y)
+
+# Raw canonical coefficients
+cc1_fold3[1:4]
+
+# Compute canonical loadings
+cc2_fold3 <- comput(train.fold3.X, train.fold3.Y, cc1_fold3)
+
+# Display canonical loadings
+cc2_fold3[3:6]
+
+rawx.fold3 <- data.frame(cc1_fold3[3])
+rawy.fold3 <- data.frame(cc1_fold3[4])
+
+
+LCx.fold3 <- as.matrix(train.fold3.X) %*% as.matrix(rawx.fold3)
+LCy.fold3 <- as.matrix(train.fold3.Y) %*% as.matrix(rawy.fold3)
+
+cor(LCx.fold3) # this should be 0
+cor(LCy.fold3) # this should be 0
+
+```
+```{r}
+# checking of the variates are significant
+# tests of canonical dimensions
+train.fold3.rho <- cc1_fold3$cor
+
+## Define number of observations, number of variables in first set, and number of variables in the second set.
+## Calculate p-values using the F-approximations of different test statistics:
+# Tests of canonical dimensions
+
+train.fold3.n <- dim(train.fold3.X)[1]
+train.fold3.p <- length(train.fold3.X)
+train.fold3.q <- length(train.fold3.Y)
+
+p.asym(train.fold3.rho, train.fold3.n, train.fold3.p, train.fold3.q, tstat = "Wilks")
+
+# the first row in the table corrosponds to the first test of the canonical dimensions tests whether all 24 dimensions are significant (they are, F = 5.12), the next test tests whether dimensions 2 to 24 combined are significant (they are, F = 3.1) and so on. Seems like first 7 combinations are significant (suggesting that ther4e could be 7 underlying latent constructs).
+
+# eigen value: largest squared correlation /(1- largest squared correlation)
+# sources: https://stats.oarc.ucla.edu/spss/output/canonical-correlation-analysis/
+# eigen value to var. explained calculation: https://www.youtube.com/watch?fbclid=IwAR2d0SmdeBtAhkJ523e0yClNPJgj8TnXuwyif21j8Ap1hoJcvOY-OY-bRa4&v=V_LwggWX0tk&feature=youtu.be
+
+cc1_fold3.ev <- (cc1_fold3$cor^2)/(1-cc1_fold3$cor^2)
+fold3.train.rsq <- cc1_fold3.ev/sum(cc1_fold3.ev)
+
+#comupting toral variance explained by the first 7 variates as those are significant
+sum(fold3.train.rsq[1:7])
+
+# 92% of the variance is explained by first 7 variates for the training set.
+
+
+
+# standardized  canonical coefficients diagonal matrix of X standard deviation's
+s1 <- diag(sqrt(diag(cov(train.X))))
+s1 %*% cc1_fold3$xcoef
+
+# standardized  canonical coefficients diagonal matrix of Y sd's
+s2 <- diag(sqrt(diag(cov(train.Y))))
+round(s2 %*% cc1_fold3$ycoef,2)
+
+# we use std coeffecients only for the interpretation purposes and use raw coefficients for fit the test data
+
+# we interpret these coefficient same way as we do for regression using variate as the DV. For example, we can say that 1 unit increase in IV1 leads to -.40 unit decrease in the first variate. However, in order to see if these coefficients are significant, we check the canonical loadings. Canonical loadings signify how much are these variable are loading on the variate. The difference between canonical coefficint and the loadings is that in the case of CC the predictors assume the presence of other predictors in the equation whereas loadings does not assume that. CL(corr.X.xscores and corr.Y.yscores) tell you how much a particular variable corelates with the latent variate. SO if the loading is above .3 it is considered as moderate and that coefficient is considered as significant. Cross-loadings (corr.Y.xscores, corr.X.yscores) signify the strength of correlation between one side variable and the other side latent construct (hence should be verified to see if the variables are loading more on the opposite side latent variable). Note*- loadings should always be greter than the cross-loadings.
+
+```
+```{r}
+#fitting the model to the test data now
+
+# Creating linear combinations
+# As matrices
+
+test.fold3.X <- data_cca3 %>% 
+  dplyr::select(IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV28, IV29)
+
+test.fold3.Y <- data_cca3 %>% 
+  dplyr::select(DV1, DV2, DV3, DV3, DV4, DV5)
+
+#test.fold3.Y <- data_cca3 %>% 
+#  dplyr::select(DV1, DV2, DV3, DV3, DV4, DV5, DV6, DV7, DV7t, DV8, DV9, DV10, DV11, DV12, DV13, DV14, DV16, DV18, DV20, DV21, DV22, DV23, DV24, DV25, DV27, DV28)
+
+
+
+test.fold3.LCx <- as.matrix(test.fold3.X) %*% as.matrix(rawx.fold3)
+test.fold3.LCy <- as.matrix(test.fold3.Y) %*% as.matrix(rawy.fold3)
+
+
+
+#Computing variates for the test set
+test.variates.fold3 <- c()
+for (each in (1:ncol(test.fold3.LCx))){
+  test.variates.fold3 <- c(test.variates.fold3, cor(test.fold3.LCx[,each], test.fold3.LCy[,each]))
+}
+test.variates.fold3
+
+test.fold3.ev <- (test.variates.fold3^2)/(1-test.variates.fold3^2)
+test.fold3.rsq <- test.fold3.ev/sum(test.fold3.ev)
+
+#comupting toral variance explained by the first 7 variates as those are significant
+#sum(fold3.rsq[1:7])
+```
+```{r}
+# checking of the variates are significant for the test set
+# tests of canonical dimensions
+test.fold3.rho <- test.variates.fold3
+## Define number of observations, number of variables in first set, and number of variables in the second set.
+test.fold3.n <- dim(test.fold3.X)[1]
+test.fold3.p <- length(test.fold3.X)
+test.fold3.q <- length(test.fold3.Y)
+
+## Calculate p-values using the F-approximations of different test statistics:
+wilk.sig.fold3<-p.asym(test.fold3.rho, test.fold3.n, test.fold3.p, test.fold3.q, tstat = "Wilks")
+
+# None of the corelation is significant for the test set if we put all the DVs. However, 1 is turning significant if I put first 5 DVs.
+```
+
+###################################################################################
+#                                                                                 #
+#                     running the 4 step for the fourth fold                      #
+#                                                                                 #
+###################################################################################
+
+Step 4a for data_cca4 as test set
+```{r}
+# merging the rest of the subsets for training set
+
+trainingset4 <- rbind(data_cca2, data_cca3, data_cca1, data_cca5)
+
+#seperating the X and Y for canonical correltation
+train.fold4.X <- trainingset4 %>% 
+  dplyr::select(IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV28)
+
+train.fold4.Y <- trainingset4 %>% 
+  dplyr::select(DV1, DV2, DV3, DV3, DV4, DV5, DV6, DV7, DV7t, DV7ph, DV8, DV9, DV10, DV11, DV12, DV13, DV14, DV16, DV18, DV20, DV21, DV22, DV23, DV24, DV25, DV27, DV28)
+```
+
+4a) running canonical correltaion on the training set
+```{r}
+#describing data
+#ggpairs(X)
+#ggpairs(Y) 
+
+#corelations
+r<-data.frame(cor(train.fold4.X))
+#ggcorrplot(r)
+
+# Canonical correlation
+cc1_fold4 <- cc(train.fold4.X, train.fold4.Y)
+
+# Raw canonical coefficients
+cc1_fold4[1:4]
+
+# Compute canonical loadings
+cc2_fold4 <- comput(train.fold4.X, train.fold4.Y, cc1_fold4)
+
+# Display canonical loadings
+cc2_fold4[3:6]
+
+
+```
+```{r}
+# checking of the variates are significant
+# tests of canonical dimensions
+train.fold4.rho <- cc1_fold4$cor
+
+## Define number of observations, number of variables in first set, and number of variables in the second set.
+## Calculate p-values using the F-approximations of different test statistics:
+# Tests of canonical dimensions
+
+train.fold4.n <- dim(train.fold4.X)[1]
+train.fold4.p <- length(train.fold4.X)
+train.fold4.q <- length(train.fold4.Y)
+
+p.asym(train.fold4.rho, train.fold4.n, train.fold4.p, train.fold4.q, tstat = "Wilks")
+
+# the first row in the table corrosponds to the first test of the canonical dimensions tests whether all 24 dimensions are significant (they are, F = 5.12), the next test tests whether dimensions 2 to 24 combined are significant (they are, F = 3.1) and so on. Seems like first 7 combinations are significant (suggesting that ther4e could be 7 underlying latent constructs).
+
+# eigen value: largest squared correlation /(1- largest squared correlation)
+# sources: https://stats.oarc.ucla.edu/spss/output/canonical-correlation-analysis/
+# eigen value to var. explained calculation: https://www.youtube.com/watch?fbclid=IwAR2d0SmdeBtAhkJ523e0yClNPJgj8TnXuwyif21j8Ap1hoJcvOY-OY-bRa4&v=V_LwggWX0tk&feature=youtu.be
+
+cc1_fold4.ev <- (cc1_fold4$cor^2)/(1-cc1_fold4$cor^2)
+fold4.train.rsq <- cc1_fold4.ev/sum(cc1_fold4.ev)
+
+#comupting toral variance explained by the first 7 variates as those are significant
+sum(fold4.train.rsq[1:7])
+
+# 92% of the variance is explained by first 7 variates for the training set.
+
+
+
+# standardized  canonical coefficients diagonal matrix of X standard deviation's
+s1 <- diag(sqrt(diag(cov(train.fold4.X))))
+s1 %*% cc1_fold4$xcoef
+
+# standardized  canonical coefficients diagonal matrix of Y sd's
+s2 <- diag(sqrt(diag(cov(train.fold4.Y))))
+round(s2 %*% cc1_fold4$ycoef,2)
+
+# we use std coeffecients only for the interpretation purposes and use raw coefficients for fit the test data
+
+# we interpret these coefficient same way as we do for regression using variate as the DV. For example, we can say that 1 unit increase in IV1 leads to -.40 unit decrease in the first variate. However, in order to see if these coefficients are significant, we check the canonical loadings. Canonical loadings signify how much are these variable are loading on the variate. The difference between canonical coefficint and the loadings is that in the case of CC the predictors assume the presence of other predictors in the equation whereas loadings does not assume that. CL(corr.X.xscores and corr.Y.yscores) tell you how much a particular variable corelates with the latent variate. SO if the loading is above .3 it is considered as moderate and that coefficient is considered as significant. Cross-loadings (corr.Y.xscores, corr.X.yscores) signify the strength of correlation between one side variable and the other side latent construct (hence should be verified to see if the variables are loading more on the opposite side latent variable). Note*- loadings should always be greter than the cross-loadings.
+
+```
+```{r}
+#fitting the model to the test data now
+
+# Creating linear combinations
+# As matrices
+
+test.fold4.X <- data_cca4 %>% 
+  dplyr::select(IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV28)
+
+test.fold4.Y <- data_cca4 %>% 
+  dplyr::select(DV1, DV2, DV3, DV3, DV4, DV5, DV6, DV7, DV7t, DV7ph, DV8, DV9, DV10, DV11, DV12, DV13, DV14, DV16, DV18, DV20, DV21, DV22, DV23, DV24, DV25, DV27, DV28)
+
+
+rawx <- data.frame(cc1_fold4[3])
+rawy <- data.frame(cc1_fold4[4])
+
+
+LCx <- as.matrix(test.fold4.X) %*% as.matrix(rawx)
+LCy <- as.matrix(test.fold4.Y) %*% as.matrix(rawy)
+
+cor(LCx) # this should be 0
+cor(LCy) # this should be 0
+
+#Computing variates for the test set
+test.fold4.variates <- c()
+for (each in (1:ncol(LCx))){
+  test.fold4.variates <- c(test.fold4.variates, cor(LCx[,each], LCy[,each]))
+}
+test.fold4.variates
+
+test.fold4.ev <- (test.fold4.variates^2)/(1-test.fold4.variates^2)
+test.fold4.rsq <- test.fold4.ev/sum(test.fold4.ev)
+
+#comupting toral variance explained by the first 7 variates as those are significant
+sum(test.fold4.rsq[1:7])
+```
+```{r}
+# checking of the variates are significant for the test set
+# tests of canonical dimensions
+test.fold4.rho <- test.fold4.variates
+## Define number of observations, number of variables in first set, and number of variables in the second set.
+test.fold4.n <- dim(test.fold4.X)[1]
+test.fold4.p <- length(test.fold4.X)
+test.fold4.q <- length(test.fold4.Y)
+
+## Calculate p-values using the F-approximations of different test statistics:
+wilk.sig.fold4<-p.asym(test.fold4.rho, test.fold4.n, test.fold4.p, test.fold4.q, tstat = "Wilks")
+
+# only the first variate is significant for the test set and it alone is explaining 80% of the variance.
+```
+
+###################################################################################
+#                                                                                 #
+#                     running the 4 step for the fifth fold                      #
+#                                                                                 #
+###################################################################################
+
+Step 4a for data_cca1 as test set
+```{r}
+# merging the rest of the subsets for training set
+
+trainingset4 <- rbind(data_cca2, data_cca3, data_cca4, data_cca1)
+
+#seperating the X and Y for canonical correltation
+train.fold5.X <- trainingset4 %>% 
+  dplyr::select(IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV28)
+
+#train.fold5.Y <- trainingset4 %>% 
+#  dplyr::select(DV1, DV2, DV3, DV3, DV4, DV5, DV6, DV7, DV7t, DV7ph, DV8, DV9, DV10, DV11, DV12, DV13, #DV14, DV16, DV18, DV20, DV21, DV22, DV23, DV24, DV25, DV27, DV28)
+
+#train.fold5.Y <- trainingset4 %>% 
+#  dplyr::select(DV1, DV2, DV3, DV3, DV4, DV5)
+
+```
+
+4a) running canonical correltaion on the training set
+```{r}
+#describing data
+#ggpairs(X)
+#ggpairs(Y) 
+
+#corelations
+r<-data.frame(cor(train.X))
+#ggcorrplot(r)
+
+# Canonical correlation
+cc1_fold1 <- cc(train.X, train.Y)
+
+# Raw canonical coefficients
+cc1_fold1[1:4]
+
+# Compute canonical loadings
+cc2_fold1 <- comput(train.X, train.Y, cc1_fold1)
+
+# Display canonical loadings
+cc2_fold1[3:6]
+
+
+```
+```{r}
+# checking of the variates are significant
+# tests of canonical dimensions
+train.rho <- cc1_fold1$cor
+
+## Define number of observations, number of variables in first set, and number of variables in the second set.
+## Calculate p-values using the F-approximations of different test statistics:
+# Tests of canonical dimensions
+
+train.n <- dim(train.X)[1]
+train.p <- length(train.X)
+train.q <- length(train.Y)
+
+p.asym(train.rho, train.n, train.p, train.q, tstat = "Wilks")
+
+# the first row in the table corrosponds to the first test of the canonical dimensions tests whether all 24 dimensions are significant (they are, F = 5.12), the next test tests whether dimensions 2 to 24 combined are significant (they are, F = 3.1) and so on. Seems like first 7 combinations are significant (suggesting that ther4e could be 7 underlying latent constructs).
+
+# eigen value: largest squared correlation /(1- largest squared correlation)
+# sources: https://stats.oarc.ucla.edu/spss/output/canonical-correlation-analysis/
+# eigen value to var. explained calculation: https://www.youtube.com/watch?fbclid=IwAR2d0SmdeBtAhkJ523e0yClNPJgj8TnXuwyif21j8Ap1hoJcvOY-OY-bRa4&v=V_LwggWX0tk&feature=youtu.be
+
+cc1_fold1.ev <- (cc1_fold1$cor^2)/(1-cc1_fold1$cor^2)
+fold1.rsq <- cc1_fold1.ev/sum(cc1_fold1.ev)
+
+#comupting toral variance explained by the first 7 variates as those are significant
+sum(fold1.rsq[1:7])
+
+# 92% of the variance is explained by first 7 variates for the training set.
+
+
+
+# standardized  canonical coefficients diagonal matrix of X standard deviation's
+s1 <- diag(sqrt(diag(cov(X))))
+s1 %*% cc1_fold1$xcoef
+
+# standardized  canonical coefficients diagonal matrix of Y sd's
+s2 <- diag(sqrt(diag(cov(Y))))
+round(s2 %*% cc1_fold1$ycoef,2)
+
+# we use std coeffecients only for the interpretation purposes and use raw coefficients for fit the test data
+
+# we interpret these coefficient same way as we do for regression using variate as the DV. For example, we can say that 1 unit increase in IV1 leads to -.40 unit decrease in the first variate. However, in order to see if these coefficients are significant, we check the canonical loadings. Canonical loadings signify how much are these variable are loading on the variate. The difference between canonical coefficint and the loadings is that in the case of CC the predictors assume the presence of other predictors in the equation whereas loadings does not assume that. CL(corr.X.xscores and corr.Y.yscores) tell you how much a particular variable corelates with the latent variate. SO if the loading is above .3 it is considered as moderate and that coefficient is considered as significant. Cross-loadings (corr.Y.xscores, corr.X.yscores) signify the strength of correlation between one side variable and the other side latent construct (hence should be verified to see if the variables are loading more on the opposite side latent variable). Note*- loadings should always be greter than the cross-loadings.
+
+```
+```{r}
+#fitting the model to the test data now
+
+# Creating linear combinations
+# As matrices
+
+test.X <- data_cca1 %>% 
+  dplyr::select(IV2, IV3, IV4, IV5, IV6, IV7, IV8, IV9, IV10, IV11, IV12, IV13, IV14, IV15, IV16, IV17, IV18, IV19, IV20, IV21, IV22, IV23, IV24, IV28)
+
+test.Y <- data_cca1 %>% 
+  dplyr::select(DV1, DV2, DV3, DV3, DV4, DV5, DV6, DV7, DV7t, DV7ph, DV8, DV9, DV10, DV11, DV12, DV13, DV14, DV16, DV18, DV20, DV21, DV22, DV23, DV24, DV25, DV27, DV28)
+
+
+rawx <- data.frame(cc1_fold1[3])
+rawy <- data.frame(cc1_fold1[4])
+
+
+LCx <- as.matrix(test.X) %*% as.matrix(rawx)
+LCy <- as.matrix(test.Y) %*% as.matrix(rawy)
+
+cor(LCx) # this should be 0
+cor(LCy) # this should be 0
+
+#Computing variates for the test set
+test.variates <- c()
+for (each in (1:ncol(LCx))){
+  test.variates <- c(test.variates, cor(LCx[,each], LCy[,each]))
+}
+test.variates
+
+test.fold1.ev <- (test.variates^2)/(1-test.variates^2)
+test.fold1.rsq <- test.fold1.ev/sum(test.fold1.ev)
+
+#comupting toral variance explained by the first 7 variates as those are significant
+sum(fold1.rsq[1:7])
+```
+```{r}
+# checking of the variates are significant for the test set
+# tests of canonical dimensions
+test.rho <- test.variates
+## Define number of observations, number of variables in first set, and number of variables in the second set.
+test.n <- dim(test.X)[1]
+test.p <- length(test.X)
+test.q <- length(test.Y)
+
+## Calculate p-values using the F-approximations of different test statistics:
+p.asym(test.rho, test.n, test.p, test.q, tstat = "Wilks")
+
+# only the first variate is significant for the test set and it alone is explaining 80% of the variance.
+```

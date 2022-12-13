@@ -1,0 +1,112 @@
+---
+title: "preprocessing"
+author: "Kevin Xu"
+date: "10/15/2021"
+output: pdf_document
+---
+
+## R Markdown
+
+
+
+```{r, echo = FALSE}
+# setup
+rm(list=ls(all=TRUE))
+library(readxl)
+data = read_excel("data/Data7.28.21_pre_iPhone_sharedChange2.xlsx", sheet="cleaned")
+```
+
+```{r,echo = FALSE}
+# function that aggregates all 'like' and 'share' football neutral and negative variables (4). 
+# includes neutral or negative group (condition column) in output.
+# function will work on updated dataset.
+
+#condition column:{ 0=neutral, 1=negative }
+
+like_share <- function(data){
+  df <- as.data.frame(data[-1, c('Footb_neutLIKE', 'Footb_negLIKE', 'Footb_neutSHARE','Footb_negSHARE')])
+  df1 <-as.data.frame(matrix(nrow=nrow(df),ncol=3)) 
+  df = as.data.frame(lapply(df,as.numeric))
+  df[is.na(df)] = 0
+
+  for (j in 1:nrow(df)){
+    if ((df[j,1] == 0) | (df[j,3] == 0)){
+      df[j,5] = 1     # assign condition = 1 to observations in "neg"
+    } #if-close
+    if ((df[j,2] == 0) | (df[j,4] == 0)){
+      df[j,5] = 0     # assign condition = 0 to observations in "neut"
+    } #if-close
+    if (df[j,1] == 0 & df[j,2] == 0 & df[j,3] == 0 & df[j,4] == 0){
+      df = df[-j]    # remove all rows that are neither negative nor neutral
+    }#if-close
+  }#for close
+  df1[,1] = df$Footb_neutLIKE + df$Footb_negLIKE
+  df1[,2] = df$Footb_neutSHARE + df$Footb_negSHARE
+  df1[,3] = df[,5]
+  colnames(df1) = c("Like","Share","Condition")
+  df1 
+}
+```
+
+```{r, echo = FALSE}
+# Applying and saving 
+processed_data = like_share(data)
+
+write.csv(processed_data,"C:/Users/kxu97/OneDrive/Documents/Employment/C^2 Research Lab/CCA Example Presentation/neut_neg_preprocess.csv", row.names=FALSE)
+```
+
+```{r}
+# CCA Attempt (incomplete)
+# I used this as reference: {https://stats.idre.ucla.edu/r/dae/canonical-correlation-analysis/#:~:text=Canonical%20Correlation%20Analysis%20%7C%20R%20Data%20Analysis%20Examples.,where%20are%20there%20are%20multiple%20intercorrelated%20outcome%20variables}
+
+library(CCA)
+library(ggplot2)
+library(GGally)
+library(CCP)
+like <- as.data.frame(processed_data[,1])
+share <- as.data.frame(processed_data[,2])
+ggpairs(like)                                 
+ggpairs(share)
+```
+
+```{r, echo = FALSE}
+matcor(like,share)
+```
+
+```{r}
+cc1 = cc(like,share)
+cc1
+```
+
+```{r}
+# compute canonical loadings
+cc2 <- comput(like, share, cc1)
+cc2$corr.X.xscores
+cc2$corr.Y.xscores
+cc2$corr.X.yscores
+cc2$corr.Y.yscores
+```
+
+```{r}
+rho <- cc1$cor
+n <- dim(like)[1]
+p <- length(like)
+q <- length(share)
+
+## Calculate p-values using the F-approximations of different test statistics:
+p.asym(rho, n, p, q, tstat = "Wilks")
+p.asym(rho, n, p, q, tstat = "Hotelling")
+p.asym(rho, n, p, q, tstat = "Pillai")
+p.asym(rho, n, p, q, tstat = "Roy")
+```
+
+```{r}
+```
+
+
+
+
+
+
+
+

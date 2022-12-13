@@ -1,0 +1,198 @@
+---
+title: "DV.EFA_Emotionality_Large_reg"
+author: "Arti Thakur"
+date: "1/23/2022"
+output: html_document
+---
+
+```{r, eval = TRUE, include = FALSE}
+rm(list=ls(all=TRUE))
+
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(ggrepel)
+library(stringr)
+library(knitr)
+library(CCA)
+library(CCP)
+library(readxl)
+library(caret)
+library(heplots)
+library(leaps)
+library(olsrr)
+library(flexmix)
+library(Hmisc)
+library(stargazer)
+```
+
+### 1. Load the data and split in two half
+```{r, eval = TRUE, include = FALSE}
+
+#data = read_xlsx("../data/Data_Oct2022_Study2_scores.xlsx")
+d = read_xlsx("../data/Data_May2022_Study1_ScoresQuestions_tocalstages.xlsx")
+#names(data) <- make.names(names(data)) # for removing special characters from colnames
+
+#summary(data)
+
+
+
+```
+
+### This part of the code run and save the explainatory models
+## explain.models have all four explanatory models saved
+## Note: For each DV, manually replace the DV name. there would be 5 replacements in total
+```{r}
+#var_names <- c("IV.EFA_CogRefl_Large", "IV.EFA_CogRefl_Large", "IV.EFA_Spirituality_Large", "IV.EFA_Receptivness_Large", "Stages", "DV.CFA_AVG.MentalCapt")
+#var_names <- c('DV.EFA_MentalCaptv_Large',	'DV.EFA_Naivety_Large',	'DV.EFA_Emotionality_Large',	'DV.EFA_Judgementl_Large',	'DV.EFA_Stereotyping_Large', "Stages")
+# To predict stages, asti
+  var_names <- c("Age", "Edu", "FFMQ1", "FFMQ2", "FFMQ3", "FFMQ4", "FFMQ5", "FFMQ6", "FFMQ7", "FFMQ8", "FFMQ9", "FFMQ10", "SCS1", "SCS2", "SCS3", "SCS4", "SCS5", "SCS6", "SCS7", "SCS8", "SCS9", "SCS10", "TIPIemoStab1", "TIPIemoStab2", "TIPIopen1", "TIPIopen2", "NETI1", "NETI2", "NETI3", "NETI4", "NETI5", "NETI6", "NETI7", "NETI8", "NETI9", "NETI10", "NETI11", "NETI12", "PNSE1", "PNSE2", "PNSE3", "PNSE4", "PNSE5", "Stages")
+data <- d[var_names]
+data<-na.omit(data)
+# Set seed for reproducibility (123, 5682, 19084, 1342, 3464, 917829235, 346893457, 345724, 899572, 92585623)
+for (each in c(123, 5682, 19084, 1342, 3464, 917829235, 346893457, 345724, 899572, 92585623)){
+  set.seed(each)
+
+  #Spliting the data in "explain" and "predict" sets
+  index = caret::createDataPartition(data$Stages, p = 0.50, list = FALSE)
+  set.explain = data[index, ]
+  set.predict = data[-index, ]  
+  explain.models <- vector(mode="list", length=4) 
+  predict.models <- vector(mode="list", length=4)
+  
+  # var_names <- c("FFMQ1",	"FFMQ2",	"FFMQ3",	"FFMQ4",	"FFMQ5",	"FFMQ6",	"FFMQ7",	"FFMQ8",	"FFMQ9",	"FFMQ10",	"SCS1",	"SCS2",	"SCS3",	"SCS4",	"SCS5",	"SCS6",	"SCS7",	"SCS8",	"SCS9",	"SCS10",	"TIPIemoStab1",	"TIPIemoStab2", "NETI1" , "NETI2" , "NETI3" , "NETI4" , "NETI5" , "NETI6" , "NETI7" , "NETI8" , "NETI9" , "NETI10" , "NETI11" , "NETI12" , "PNSE1" , "PNSE2" , "PNSE3" , "PNSE4" , "PNSE5" , "IOS1" , "IOS2" , "Mscale1" , "Mscale2" , "Mscale3" , "Mscale4" , "Mscale5" , "Mscale6" , "Mscale7" , "GQ1" , "GQ2" , "GQ3" , "GQ4" , "GQ5" , "GQ6" , "BEIS1" , "BEIS2" , "BEIS3" , "BEIS4" , "BEIS5" , "BEIS6" , "BEIS7" , "BEIS8" , "BEIS9" , "BEIS10" , "TIPIopen1" , "TIPIopen2" , "IRI1" , "IRI2" , "IRI3" , "IRI4" , "IRI5" , "IRI6" , "IRI7" , "Age" , "Edu" , "StagesFourBins" , "StagesBinary4.5", "DV.EFA_Emotionality_Large")
+  
+  
+  explain.X <- set.explain %>% dplyr::select(var_names)
+  
+  
+  ## model1- backward and forward selection using p-value
+  fitall <- lm(Stages~., data= explain.X)
+  summary(fitall)
+  #backward elimination at p>0.01
+  model.backward.p <- ols_step_backward_p(fitall, prem= 0.01, details = TRUE)
+  model.backward.p$model
+  
+  #same the model
+  explain.models[[1]] <- as.formula(paste(colnames(model.backward.p$model$model)[1], "~", paste(colnames(model.backward.p$model$model)[-1], collapse = " + ")))
+  
+  
+  
+  ## model2- using BIC criterion
+  #backward elemination
+  #here log(n) is used for BIC as elemination criterion
+  n<- nrow(explain.X)
+  model.bic.backward<-stepAIC(fitall, scope = list(upper = fitall, lower = ~1), direction = "backward",
+  k = log(n), trace = TRUE)
+  explain.models[[2]] <- as.formula(paste(colnames(model.bic.backward$model)[1], "~", paste(colnames(model.bic.backward$model)[-1], collapse = " + ")))
+  #summary(model.bic.backward)
+  
+  
+  ################## Exhaustive search for adj-rsqr model #####
+  sub_set <- regsubsets(Stages ~., data= explain.X, nbest = 1,
+  nvmax = 5, method = "exhaustive", really.big=T)
+  sum_sub <- summary(sub_set)
+  #sum_sub
+  plot(sub_set)
+  # saving best models of different sizes based on Adj. R2
+  result<-data.frame(
+  Adj.R2 = which.max(sum_sub$adjr2)
+  )
+  # final model selection using adjested rsqr criterion
+  all.pred.status <- summary(sub_set)$which[result$Adj.R2,-1]
+  predictors <- names(which(all.pred.status == TRUE))
+  predictors <- paste(predictors, collapse = "+")
+  explain.models[[3]] <-as.formula(paste0(colnames(model.bic.backward$model)[1], "~", predictors))
+  
+  
+  ####################### 1 stnd error rule######
+  # Set up repeated k-fold cross-validation
+  train.control <- trainControl(method = "repeatedcv", number = 3, repeats = 5)
+  # Train the model
+  step.model <- train(Stages ~., data = explain.X,
+                    method = "leapBackward", 
+                    tuneGrid = data.frame(nvmax = 1:5),
+                    trControl = train.control
+                    )
+  step.model$results 
+  
+  ##applying 1 standard error rule and choose the most parsimonious model within one std deviation of least rmse model
+  #find minimum rmse and rmsesd
+  min.rmse <- min(step.model$results$RMSE)
+  min.rmsesd <- step.model$results[which.min(step.model$results$RMSE),'RMSESD']
+  
+  # compute the threshold
+  rmse.cutoff <- min.rmse + min.rmsesd
+  considered.models <- step.model$results[step.model$results$RMSE<rmse.cutoff,]
+  
+  
+  predictors <- paste(names(coef(step.model$finalModel,considered.models$nvmax[1]))[-1], collapse = "+")
+  explain.models[[4]] <-as.formula(paste0(colnames(model.bic.backward$model)[1], "~", predictors))
+  
+  # plot(c(1:77), step.model$results$RMSE)
+  # abline(h=rmse.cutoff,lty=2)
+  # p<- ggplot(step.model$results, aes(x=nvmax, y=RMSE)) + 
+  #   geom_line() +
+  #   geom_point()+
+  #   geom_errorbar(aes(ymin=RMSE-RMSESD, ymax=RMSE+RMSESD), width=.2,
+  #                  position=position_dodge(0.05))
+  # print(p)
+  # # Finished line plot
+  # p+labs(title="1 se rule", x="number of variables", y = "RMSE")+
+  #    theme_classic() +
+  #    scale_color_manual(values=c('#999999','#E69F00'))
+  
+  
+  
+  
+  ################################ PREDICTION STEP ###########################
+  
+
+  predict.X <- set.predict %>% dplyr::select(var_names)
+  
+  
+  
+  # Set up repeated k-fold cross-validation
+  # repeated k-fold repeats the k-fold cross-validation for the desired times for reilable accuracy 
+  # I tried different vales of K and repeats and finally settled for k=3, repeats=5
+  
+  train.control <- trainControl(method = "repeatedcv", number = 3, repeats = 5)
+  # testing with the four models from "explain" step
+  for (each in c(1,2,3,4)){
+  predict.models[[each]]<- train(explain.models[[each]], data = predict.X, method = "lm", trControl = train.control, metric = "RMSE")
+  }
+  
+  # model selection using minimum RMSE criterion
+  #pred.mod.results <- rbind( step.model4$results, step.model2$results, step.model1$results, step.model3$results, step.model0$results)
+  
+  pred.mod.results <- rbind(  predict.models[[1]]$results, predict.models[[2]]$results, predict.models[[3]]$results, predict.models[[4]]$results)
+
+out= capture.output(predict.models[[which.min(pred.mod.results$RMSE)]]$finalModel %>% stargazer(type = 'text',star.cutoffs = c(.05,.01,.001), title = paste(c("model:"), as.character(which.min(pred.mod.results$RMSE)), c("RMSE"), as.character(min(round(pred.mod.results$RMSE, 4)))),
+            multicolumn = T,
+            omit.stat = c('f'), report = 'vc*s', no.space = T,
+            order = c('1$')))
+cat(paste(out, "\n"), file = "./output/DV_reg/Stages.txt", append= TRUE)
+
+}
+
+
+```
+```{r}
+
+# model comparison using F-test
+m1 = lm(Stages ~ Age+ FFMQ2+ FFMQ6+NETI5, d) #reduced
+m2 = lm(Stages ~ Age+ FFMQ2+ FFMQ6+NETI5+SCS8+NETI3+PNSE4+PNSE5+TIPIopen1, d)
+m3 = lm(Stages ~ Age+ FFMQ2+ FFMQ6+ SCS3+SCS8+NETI1+NETI2+NETI3+NETI5+NETI6+PNSE4+PNSE5+TIPIopen1, d)
+list(m1, m2, m3, anova(m1,m2), anova(m2, m3)) %>% stargazer( type = 'text', multicolumn= F, order = c('1$')) #full model
+.Last.value  %>%
+  cat(file = "model_comp.txt", sep = '\n')
+
+m4 = lm(CCI ~ SCS2 + TIPIopen2 + Age + PNSE4, d)
+m5 = lm(CCI ~ SCS2 + TIPIopen2 + Age + PNSE4+ FFMQ9+ FFMQ6+NETI5+SCS3+ SCS6 + TIPIopen2+NETI3+NETI5+NETI3+PNSE3+TIPIopen1, d)
+m6 = lm(CCI ~ Age+ FFMQ2+ FFMQ6+ SCS3+SCS8+NETI1+NETI2+NETI3+NETI5+NETI6+PNSE4+PNSE5+TIPIopen1, d)
+list(m1, m2, m3, anova(m1,m2), anova(m2, m3)) %>% stargazer( type = 'text', multicolumn= F, order = c('1$'))
+.Last.value  %>%
+  cat(file = "model_comp.txt", sep = '\n')
+
+```
+
